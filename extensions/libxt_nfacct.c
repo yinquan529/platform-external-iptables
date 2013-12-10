@@ -17,13 +17,25 @@
 #include <linux/netfilter/xt_nfacct.h>
 
 enum {
+	FL_NAME 	= 0,
+	FL_QUOTA	= 1 << 1,
+	FL_PACKET	= 1 << 2,
+};
+
+enum {
 	O_NAME = 0,
+	O_QUOTA,
+	O_PACKET,
 };
 
 #define s struct xt_nfacct_match_info
 static const struct xt_option_entry nfacct_opts[] = {
 	{.name = "nfacct-name", .id = O_NAME, .type = XTTYPE_STRING,
 	 .min = 1, .flags = XTOPT_MAND|XTOPT_PUT, XTOPT_POINTER(s, name)},
+	{.name = "quota", .id = O_QUOTA, .type = XTTYPE_UINT64,
+	 .flags = XTOPT_INVERT | XTOPT_PUT,
+	 XTOPT_POINTER(s, quota)},
+	{.name = "packets", .id = O_PACKET, .type = XTTYPE_NONE},
 	XTOPT_TABLEEND,
 };
 #undef s
@@ -31,17 +43,30 @@ static const struct xt_option_entry nfacct_opts[] = {
 static void nfacct_help(void)
 {
 	printf("nfacct match options:\n"
-	       " --nfacct-name STRING		Name of accouting area\n");
+	       " --nfacct-name STRING		Name of accouting area\n"
+	       " [!] --quota quota		initial quota (bytes or packets)\n"
+	       " --packets			count packets instead of bytes\n");
 }
 
 static void nfacct_parse(struct xt_option_call *cb)
 {
+	struct xt_nfacct_match_info *info =
+				(struct xt_nfacct_match_info *)cb->data;
+
 	xtables_option_parse(cb);
 	switch (cb->entry->id) {
 	case O_NAME:
 		if (strchr(cb->arg, '\n') != NULL)
 			xtables_error(PARAMETER_PROBLEM,
 				   "Newlines not allowed in --nfacct-name");
+		break;
+	case O_PACKET:
+		info->flags |= XT_QUOTA_PACKET;
+		break;
+	case O_QUOTA:
+		info->flags |= XT_QUOTA_QUOTA;
+		if (cb->invert)
+			info->flags |= XT_QUOTA_INVERT;
 		break;
 	}
 }
@@ -60,6 +85,13 @@ static void nfacct_print(const void *ip, const struct xt_entry_match *match,
 		(struct xt_nfacct_match_info *)match->data;
 
 	nfacct_print_name(info, "");
+	if (info->flags & XT_QUOTA_QUOTA) {
+		if (info->flags & XT_QUOTA_PACKET)
+			printf(" packets");
+		if (info->flags & XT_QUOTA_INVERT)
+			 printf(" !");
+		printf(" quota: %llu", (unsigned long long)info->quota);
+	}
 }
 
 static void nfacct_save(const void *ip, const struct xt_entry_match *match)
@@ -68,6 +100,13 @@ static void nfacct_save(const void *ip, const struct xt_entry_match *match)
 		(struct xt_nfacct_match_info *)match->data;
 
 	nfacct_print_name(info, "--");
+	if (info->flags & XT_QUOTA_QUOTA) {
+		if (info->flags & XT_QUOTA_PACKET)
+			printf(" --packets");
+		if (info->flags & XT_QUOTA_INVERT)
+			printf(" !");
+		printf(" --quota %llu", (unsigned long long)info->quota);
+	}
 }
 
 static struct xtables_match nfacct_match = {
